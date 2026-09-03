@@ -11,3 +11,28 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Publisher {
+  id         String    @id @default(cuid())
+  name       String
+  url        String    @unique
+  rssFeedUrl String?
+  region     String
+  createdAt  DateTime  @default(now())
+  articles   Article[]
+}
+
+model Article {
+  id           String    @id @default(cuid())
+  title        String
+  summary      String?
+  url          String    @unique
+  thumbnailUrl String?
+  region       String
+  publishedAt  DateTime
+  createdAt    DateTime  @default(now())
+  publisherId  String
+  publisher    Publisher @relation(fields: [publisherId], references: [id])
+
+  @@index([region, publishedAt])
+}

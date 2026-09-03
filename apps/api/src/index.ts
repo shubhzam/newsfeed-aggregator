@@ -1,16 +1,12 @@
-import "dotenv/config";
 import express from "express";
-import { PrismaClient } from "./generated/prisma/client.js";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Redis } from "ioredis";
-
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
-
-const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+import { prisma } from "./lib/prisma.js";
+import { redis } from "./lib/redis.js";
+import { config } from "./lib/config.js";
+import { feedRouter } from "./routes/feed.js";
 
 const app = express();
-const port = process.env.PORT ?? 4000;
+
+app.use(feedRouter);
 
 app.get("/health", async (_req, res) => {
   const checks = { database: false, redis: false };
@@ -33,6 +29,6 @@ app.get("/health", async (_req, res) => {
   res.status(allHealthy ? 200 : 503).json({ status: allHealthy ? "ok" : "degraded", checks });
 });
 
-app.listen(port, () => {
-  console.log(`api listening on http://localhost:${port}`);
+app.listen(config.port, () => {
+  console.log(`api listening on http://localhost:${config.port}`);
 });
