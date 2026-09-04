@@ -34,5 +34,5 @@ model Article {
   publisherId  String
   publisher    Publisher @relation(fields: [publisherId], references: [id])
 
-  @@index([region, publishedAt])
+  @@index([region, publishedAt, id])
 }

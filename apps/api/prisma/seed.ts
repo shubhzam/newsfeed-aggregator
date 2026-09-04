@@ -1,10 +1,10 @@
 import { prisma } from "../src/lib/prisma.js";
 
 const publishers = [
-  { name: "ESPN", url: "https://espn.com", region: "US" },
-  { name: "TechCrunch", url: "https://techcrunch.com", region: "US" },
-  { name: "BBC News", url: "https://bbc.co.uk/news", region: "UK" },
-  { name: "The Guardian", url: "https://theguardian.com", region: "UK" },
+  { name: "ESPN", url: "https://espn.com", region: "US", rssFeedUrl: "http://www.espn.com/espn/rss/news" },
+  { name: "TechCrunch", url: "https://techcrunch.com", region: "US", rssFeedUrl: "https://techcrunch.com/feed/" },
+  { name: "BBC News", url: "https://bbc.co.uk/news", region: "UK", rssFeedUrl: "https://feeds.bbci.co.uk/news/uk/rss.xml" },
+  { name: "The Guardian", url: "https://theguardian.com", region: "UK", rssFeedUrl: "https://www.theguardian.com/uk/rss" },
 ];
 
 const headlines: Record<string, string[]> = {
@@ -62,7 +62,7 @@ async function main() {
   for (const pub of publishers) {
     const publisher = await prisma.publisher.upsert({
       where: { url: pub.url },
-      update: {},
+      update: { rssFeedUrl: pub.rssFeedUrl },
       create: pub,
     });
 
