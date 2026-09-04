@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import { prisma } from "../lib/prisma.js";
+import { addArticleToCache } from "../services/feedCache.js";
 
 const parser = new Parser();
 const FETCH_TIMEOUT_MS = 10_000;
@@ -33,7 +34,7 @@ async function ingestPublisher(publisher: {
       continue;
     }
 
-    await prisma.article.upsert({
+    const created = await prisma.article.upsert({
       where: { url: item.link },
       update: {},
       create: {
@@ -46,6 +47,18 @@ async function ingestPublisher(publisher: {
         publisherId: publisher.id,
       },
     });
+
+    await addArticleToCache({
+      id: created.id,
+      title: created.title,
+      summary: created.summary,
+      url: created.url,
+      thumbnailUrl: created.thumbnailUrl,
+      region: created.region,
+      publishedAt: created.publishedAt,
+      publisher: { id: publisher.id, name: publisher.name },
+    });
+
     count++;
   }
 
