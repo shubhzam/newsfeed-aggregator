@@ -29,10 +29,12 @@ model Article {
   url          String    @unique
   thumbnailUrl String?
   region       String
+  categories   String[]  @default([])
   publishedAt  DateTime
   createdAt    DateTime  @default(now())
   publisherId  String
   publisher    Publisher @relation(fields: [publisherId], references: [id])
 
   @@index([region, publishedAt, id])
+  @@index([categories], type: Gin)
 }

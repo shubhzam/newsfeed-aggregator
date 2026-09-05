@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import { prisma } from "../lib/prisma.js";
-import { addArticleToCache } from "../services/feedCache.js";
+import { ingestArticle } from "../services/ingestArticle.js";
 
 const parser = new Parser();
 const FETCH_TIMEOUT_MS = 10_000;
@@ -12,6 +12,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
     ),
   ]);
+}
+
+// rss-parser's types claim categories are always strings, but real feeds
+// (e.g. The Guardian) send <category domain="..."> which parses as an object,
+// not a string - handle both shapes rather than assume the happy path
+function normalizeCategory(category: unknown): string | null {
+  if (typeof category === "string") {
+    return category.toLowerCase();
+  }
+  if (category && typeof category === "object" && "_" in category && typeof (category as { _: unknown })._ === "string") {
+    return (category as { _: string })._.toLowerCase();
+  }
+  return null;
 }
 
 async function ingestPublisher(publisher: {
@@ -34,29 +47,19 @@ async function ingestPublisher(publisher: {
       continue;
     }
 
-    const created = await prisma.article.upsert({
-      where: { url: item.link },
-      update: {},
-      create: {
-        title: item.title ?? "Untitled",
-        summary: item.contentSnippet ?? null,
-        url: item.link,
-        thumbnailUrl: null,
-        region: publisher.region,
-        publishedAt: item.isoDate ? new Date(item.isoDate) : new Date(),
-        publisherId: publisher.id,
-      },
-    });
+    const categories = ((item.categories ?? []) as unknown[])
+      .map(normalizeCategory)
+      .filter((c): c is string => c !== null);
 
-    await addArticleToCache({
-      id: created.id,
-      title: created.title,
-      summary: created.summary,
-      url: created.url,
-      thumbnailUrl: created.thumbnailUrl,
-      region: created.region,
-      publishedAt: created.publishedAt,
-      publisher: { id: publisher.id, name: publisher.name },
+    await ingestArticle({
+      title: item.title ?? "Untitled",
+      url: item.link,
+      summary: item.contentSnippet ?? null,
+      region: publisher.region,
+      categories,
+      publishedAt: item.isoDate ? new Date(item.isoDate) : new Date(),
+      publisherId: publisher.id,
+      publisherName: publisher.name,
     });
 
     count++;

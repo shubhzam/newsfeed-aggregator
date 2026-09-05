@@ -9,6 +9,7 @@ export type FeedArticle = {
   url: string;
   thumbnailUrl: string | null;
   region: string;
+  categories: string[];
   publishedAt: Date;
   publisher: { id: string; name: string };
 };

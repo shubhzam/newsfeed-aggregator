@@ -37,6 +37,7 @@ const ARTICLE_SELECT = {
   url: true,
   thumbnailUrl: true,
   region: true,
+  categories: true,
   publishedAt: true,
   publisher: { select: { id: true, name: true } },
 } as const;
@@ -47,12 +48,13 @@ type GetFeedParams = {
   region: string;
   limit: number;
   cursor: Cursor | null;
+  category: string | null;
 };
 
-export async function getFeed({ region, limit, cursor }: GetFeedParams) {
-  // cursor-bearing requests always go straight to Postgres - the cache only serves the first page
-  if (cursor) {
-    return getFeedFromDb({ region, limit, cursor });
+export async function getFeed({ region, limit, cursor, category }: GetFeedParams) {
+  // cursor or category present -> always Postgres, cache only serves the plain first page
+  if (cursor || category) {
+    return getFeedFromDb({ region, limit, cursor, category });
   }
 
   const cached = await readFeedCache(region, limit + 1);
@@ -74,10 +76,11 @@ export async function getFeed({ region, limit, cursor }: GetFeedParams) {
   return buildPageResponse(freshBatch, limit);
 }
 
-async function getFeedFromDb({ region, limit, cursor }: GetFeedParams) {
+async function getFeedFromDb({ region, limit, cursor, category }: GetFeedParams) {
   const articles = await prisma.article.findMany({
     where: {
       region,
+      ...(category && { categories: { has: category } }),
       ...(cursor && {
         OR: [
           { publishedAt: { lt: cursor.publishedAt } },

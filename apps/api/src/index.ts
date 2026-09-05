@@ -3,10 +3,13 @@ import { prisma } from "./lib/prisma.js";
 import { redis } from "./lib/redis.js";
 import { config } from "./lib/config.js";
 import { feedRouter } from "./routes/feed.js";
+import { webhooksRouter } from "./routes/webhooks.js";
 
 const app = express();
 
+app.use(express.json());
 app.use(feedRouter);
+app.use(webhooksRouter);
 
 app.get("/health", async (_req, res) => {
   const checks = { database: false, redis: false };
