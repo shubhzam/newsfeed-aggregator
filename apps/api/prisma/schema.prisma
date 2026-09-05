@@ -13,7 +13,7 @@ datasource db {
 }
 
 model Publisher {
-  id         String    @id @default(cuid())
+  id         String    @id @default(uuid(7))
   name       String
   url        String    @unique
   rssFeedUrl String?
@@ -23,7 +23,7 @@ model Publisher {
 }
 
 model Article {
-  id           String    @id @default(cuid())
+  id           String    @id @default(uuid(7))
   title        String
   summary      String?
   url          String    @unique
