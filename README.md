@@ -16,20 +16,22 @@ Four publishers are live: TechCrunch and ESPN (`US`), BBC News and The Guardian 
                         ingestArticle()          ← the only write path
                      upsert by url, then cache
                                   │
-                   ┌──────────────┴──────────────┐
-                   ▼                             ▼
-             Postgres (truth)            Redis  feed:{region}
-          region/publishedAt/id          sorted set, cap 200
-             GIN on categories            first page only
-                   │                             │
-                   └──────────────┬──────────────┘
-                                  ▼
-                       GET /feed?region&cursor&category
-                                  │
-                   ┌──────────────┴──────────────┐
-                   ▼                             ▼
-          app/page.tsx (server)          FeedClient (client)
-          renders the first page         owns every fetch after
+         ┌────────────────────────┼────────────────────────┐
+         ▼                        ▼                        ┊
+   Postgres (truth)       Redis  feed:{region}      MinIO / S3   ┈┈ planned
+region/publishedAt/id     sorted set, cap 200    thumbnail objects
+  GIN on categories        first page only        bucket: thumbnails
+         │                        │                        ┊
+         └───────────┬────────────┘                        ┊
+                     ▼                                     ┊
+         GET /feed?region&cursor&category                  ┊
+                     │                                     ┊
+        ┌────────────┴────────────┐                        ┊
+        ▼                         ▼                        ┊
+app/page.tsx (server)      FeedClient (client) ┈┈┈┈┈┈┈┈┈┈┈┈┘
+renders the first page     owns every fetch after   <img src> resolves straight
+                                                    to the object store — image
+                                                    bytes never cross the API
 ```
 
 ---
@@ -45,6 +47,28 @@ Region is never taken from the wire. The webhook payload carries a `publisherId`
 **Where the real world intrudes:** `rss-parser`'s types claim `categories` is always `string[]`. The Guardian emits `<category domain="...">`, which parses as an object, not a string. Trusting the type signature silently drops every Guardian tag. The collector normalizes both shapes and lowercases at the boundary, which is what makes case-insensitive category filtering possible downstream without a single `LOWER()` at query time.
 
 **Failure isolation:** the collector loops publishers in a try/catch per publisher and reports a `succeeded/failed` tally. One dead feed degrades the run, it doesn't abort it. Each fetch is capped at 10 seconds, because an RSS endpoint that accepts a connection and then stalls is a more common failure than one that refuses outright.
+
+---
+
+## Thumbnails: MinIO as the object store
+
+> **Status: designed, not built.** Every article currently has `thumbnailUrl = null`. The schema has carried the column as `String?` since the first feature, so nothing needs migrating to start populating it — the unresolved question is upstream coverage, not storage. See `apps/docs/thumbnail-investigation-findings.md`.
+
+Thumbnails are the one asset in this system that is neither a row nor a cache entry, and they get their own store rather than being forced into either.
+
+**Why not just keep the publisher's image URL.** The cheapest option is to save whatever URL the feed hands over and point `<img>` at the publisher's CDN. It fails in ways that only show up later: publishers rotate and expire asset URLs, so the feed silently fills with broken images long after ingest; there is no control over cache headers, dimensions, or format; hotlinking leaks every reader's IP and referrer to four third parties; and several publishers block it outright. Copying the bytes once at ingest turns a permanent third-party dependency into a one-time fetch.
+
+**Why not Postgres.** Binary blobs in the articles table inflate row width, backups, and replication for data the feed query never reads — the entire point of the `[region, publishedAt, id]` index is tight, scannable rows. Images want an object store; the database wants to stay a database.
+
+**Why MinIO specifically.** It speaks the S3 API, so the code is written against S3 semantics rather than against MinIO. Local development runs it alongside Postgres and Redis in the same `docker-compose`, and moving to real S3 in production becomes an endpoint and credentials change rather than a rewrite. It's the same reasoning as using real Postgres and real Redis locally instead of an in-memory stand-in: develop against the actual protocol, so the thing that works locally is the thing that works deployed.
+
+**The topology that matters: the client reads the object store directly.** The collector writes objects; the API only ever hands out a URL in the JSON response; the browser fetches the image itself. Nothing routes image bytes through the feed service. Thumbnails are simultaneously the largest and the most numerous objects in the system — proxying them would turn a JSON API into a file server, put megabytes on a request path currently measured in kilobytes, and couple image throughput to API capacity for no benefit. The API's job stays "describe the articles," not "serve the pictures."
+
+**Fetching belongs on the write path.** Downloading and storing happens during ingestion, in the background, not when a reader requests the feed. Doing it lazily on read would put an unpredictable third-party round trip inside the feed response — precisely the latency the Redis first-page cache exists to eliminate.
+
+**Failure stays isolated, consistent with everything else here.** A thumbnail that can't be fetched or uploaded must not fail the article. Ingestion proceeds, `thumbnailUrl` stays `null`, and the card renders without an image — which is already the behavior today, since that's the state every article is in. An optional asset is not permitted to take down a required one.
+
+**The actual blocker is source coverage, not storage.** Prior investigation found TechCrunch's feed carries no image data at all — no `<enclosure>`, no `media:` namespace, no `<img>` in the description — so covering it means scraping article pages, a materially larger feature than reading a feed. BBC does publish `media:thumbnail`, but that's an MRSS namespace extension requiring explicit `customFields` configuration, and it lands on a known unresolved `rss-parser` bug (rbren/rss-parser #130) for exactly that tag shape: self-closing, all data in attributes, no text content — which parses to `{"$": undefined}`, silently dropping the URL. ESPN and The Guardian are still unverified. Whether this feature is worth building as scoped depends on what those two turn out to carry, which is the next thing to check.
 
 ---
 
@@ -136,6 +160,7 @@ The recurring rule across the system is that **degraded is not the same as broke
 | Postgres down | `/feed` returns 503 rather than a partial or invented result |
 | API unreachable from the browser | The page renders an error state with working controls, not a crash |
 | A "load more" page fails | Existing articles stay on screen; the error is inline and retryable |
+| Thumbnail fetch or upload fails *(planned)* | The article still ingests; `thumbnailUrl` stays `null` and the card renders without an image |
 
 `GET /health` reports Postgres and Redis independently and returns 503 when either is down, so "the API is up but its dependencies aren't" is a distinguishable state rather than a mystery.
 
