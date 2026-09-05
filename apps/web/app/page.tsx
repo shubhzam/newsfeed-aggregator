@@ -1,43 +1,42 @@
-"use client";
+import type { FeedResponse } from "@repo/shared";
+import { FeedClient } from "./components/FeedClient";
+import { fetchFeed } from "../lib/api";
+import { DEFAULT_REGION, REGIONS } from "../lib/feedOptions";
 
-import { useEffect, useState } from "react";
+// The feed changes as articles are ingested, so never serve a cached render.
+export const dynamic = "force-dynamic";
 
-type HealthResponse = {
-  status: "ok" | "degraded";
-  checks: {
-    database: boolean;
-    redis: boolean;
-  };
-};
+export default async function Home() {
+  let initialData: FeedResponse | null = null;
+  let initialError: string | null = null;
 
-export default function Home() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("http://localhost:4000/health")
-      .then((res) => res.json())
-      .then((data: HealthResponse) => setHealth(data))
-      .catch(() => setError("Could not reach the API"));
-  }, []);
+  try {
+    initialData = await fetchFeed({ region: DEFAULT_REGION });
+  } catch {
+    // Rendering an error state beats throwing into Next's error boundary —
+    // the controls stay usable so a retry doesn't require a page reload.
+    initialError = "Couldn't reach the newsfeed API. Check that it's running on port 4000.";
+  }
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "monospace" }}>
-      <h1>newsfeed-aggregator</h1>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {!error && !health && <p>Checking API health...</p>}
-      {health && (
-        <div>
-          <p>
-            Overall:{" "}
-            <strong style={{ color: health.status === "ok" ? "green" : "orange" }}>
-              {health.status}
-            </strong>
-          </p>
-          <p>Database: {health.checks.database ? "✅" : "❌"}</p>
-          <p>Redis: {health.checks.redis ? "✅" : "❌"}</p>
-        </div>
-      )}
-    </main>
+    <div className="mx-auto w-full max-w-2xl px-4 sm:px-6">
+      <header className="pt-14 pb-9 sm:pt-20">
+        <p className="font-mono text-[11px] tracking-[0.2em] text-ink-faint uppercase">
+          {REGIONS.map((region) => region.code).join(" · ")} · cursor paginated
+        </p>
+        <h1 className="mt-3 text-[38px] leading-[1.05] font-semibold tracking-[-0.03em] text-ink sm:text-[46px]">
+          Newsfeed
+        </h1>
+        <p className="mt-3 max-w-md text-[15px] leading-relaxed text-ink-muted text-pretty">
+          Everything ingested from TechCrunch, ESPN, BBC News and The Guardian, newest first.
+        </p>
+      </header>
+
+      <FeedClient
+        initialData={initialData}
+        initialRegion={DEFAULT_REGION}
+        initialError={initialError}
+      />
+    </div>
   );
 }
